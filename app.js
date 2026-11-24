@@ -27,6 +27,11 @@ let hist = store.get('hist', { days: [], prices: {} });
 let rate = null;
 const details = new Map(); // id -> carte TCGdex complète (avec prix)
 
+// Cartes de Pokémon TCG Pocket (jeu mobile) : pas de vraies cartes, et elles reprennent les illustrations
+// des cartes physiques, ce qui trompait le scanner. Même liste que tools/build_db.py
+const POCKET = /^(P-[AB]|[AB]\d+[a-z]?)$/;
+const isPocket = id => POCKET.test(id.replace(/-[^-]*$/, ''));
+
 // ---------- prix ----------
 // Même règle que tools/update_prices.py
 // Prix Cardmarket (EUR) ; si Cardmarket n'a rien, prix TCGplayer (USD) converti en EUR.
@@ -439,18 +444,39 @@ function renderList() {
   $('#list').innerHTML = rows.slice(0, 400).map(({ it, k, info, u }) => info ? `<li data-k="${k}">
     <img src="${IMG(info.img)}" alt="" loading="lazy">
     <div class="t"><b>${esc(info.name)}</b><span>${esc(info.set)} · ${esc(info.num)} · ${VNAME[it.v] || esc(it.v)}${it.q > 1 ? ' · ×' + it.q : ''}${it.pm != null ? ' · prix manuel' : ''}</span></div>
-    <div class="v">${u != null ? chf(u * it.q * r) : isSuspect(it) ? '<small>Prix douteux</small>' : '…'}${it.q > 1 && u != null ? `<small>${chf(u * r)} pièce</small>` : ''}</div></li>` : '').join('')
+    <div class="v">${u != null ? chf(u * it.q * r) : isSuspect(it) ? '<small>Prix douteux</small>' : '…'}${it.q > 1 && u != null ? `<small>${chf(u * r)} pièce</small>` : ''}</div></li>`
+    : `<li data-k="${k}"><div class="t"><b>Carte non reconnue</b><span>${esc(it.id)}${isPocket(it.id) ? ' · carte du jeu mobile Pocket' : ''} · touche pour supprimer</span></div></li>`).join('')
     || '<li class="note">Aucune carte pour l\'instant. Va dans Scanner pour en ajouter.</li>';
   $('#list').querySelectorAll('li[data-k]').forEach(li => li.onclick = () => itemSheet(coll.items[+li.dataset.k]));
 }
+// Cartes scannées par erreur comme leur version Pocket (même illustration) → vraie carte physique
+const MIGRATE = { 'A3-097': 'sm3-73', 'A3-021': 'sm3-16' };
+function migrate() {
+  let changed = false;
+  for (const it of [...coll.items]) {
+    const to = MIGRATE[it.id]; if (!to) continue;
+    const other = coll.items.find(x => x !== it && x.id === to && x.v === it.v);
+    if (other) { other.q += it.q; coll.items.splice(coll.items.indexOf(it), 1); } else it.id = to;
+    changed = true;
+  }
+  if (changed) save();
+}
 async function renderColl() {
   if (!Scan.db) return;
+  migrate();
   renderTotal(); renderList();
   if (!rate) { await getRate(); renderTotal(); renderList(); }
   fetchMissing();
 }
 async function itemSheet(it) {
-  const info = cardInfo(it.id); if (!info) return;
+  const info = cardInfo(it.id);
+  if (!info) {
+    const b = openSheet(`<h2 style="margin:0">Carte non reconnue</h2><p class="note">${esc(it.id)} n'existe pas dans la base du scanner${isPocket(it.id) ? ' (c\'est une carte du jeu mobile Pocket)' : ''}. Supprime-la puis re-scanne ta vraie carte.</p>
+      <div class="row"><button class="btn" data-a="del">Supprimer</button><button class="btn primary" data-a="ok">Fermer</button></div>`);
+    b.querySelector('[data-a=del]').onclick = () => { coll.items.splice(coll.items.indexOf(it), 1); save(); closeSheet(); renderColl(); };
+    b.querySelector('[data-a=ok]').onclick = closeSheet;
+    return;
+  }
   const box = openSheet('');
   const draw = c => {
     const r = curRate(), u = unitEur(it), vs = variantsOf(c);
@@ -521,7 +547,7 @@ const i8b64 = b => Int8Array.from(atob(b), c => (c.charCodeAt(0) << 24) >> 24);
 function loadExtras() {
   const ex = store.get('extras', { cards: [], rows: [], sets: {} });
   // les cartes que la base GitHub contient déjà n'ont plus besoin d'être gardées ici
-  const keep = ex.cards.map((c, k) => [c, ex.rows[k]]).filter(([c]) => !Scan.db.byId.has(c[0]));
+  const keep = ex.cards.map((c, k) => [c, ex.rows[k]]).filter(([c]) => !Scan.db.byId.has(c[0]) && !isPocket(c[0]));
   ex.cards = keep.map(x => x[0]); ex.rows = keep.map(x => x[1]);
   for (const id in ex.sets || {}) if (!Scan.db.sets[id]) Scan.db.sets[id] = ex.sets[id];
   Scan.addCards(ex.cards, ex.rows.map(i8b64));
@@ -538,7 +564,7 @@ async function checkNewCards(force = false) {
     const ex = store.get('extras', { cards: [], rows: [], sets: {} });
     for (const s of sets) if (!Scan.db.sets[s.id]) { Scan.db.sets[s.id] = ex.sets[s.id] = [s.name, s.cardCount?.official || 0]; }
     const setIds = new Set(sets.map(s => s.id));
-    const todo = brief.filter(c => c.image && !Scan.db.byId.has(c.id)).slice(0, 400);
+    const todo = brief.filter(c => c.image && !Scan.db.byId.has(c.id) && !isPocket(c.id)).slice(0, 400);
     let added = 0;
     const one = c => new Promise(res => {
       const img = new Image(); img.crossOrigin = 'anonymous';

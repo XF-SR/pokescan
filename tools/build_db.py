@@ -11,6 +11,7 @@ Sorties dans db/ :
 import io
 import json
 import os
+import re
 import sys
 import subprocess
 import time
@@ -66,7 +67,7 @@ def main():
     sets = get(API + "/sets")
     brief = get(API + "/cards")
     old = load_old()
-    todo = [c for c in brief if c.get("image") and c["id"] not in old]
+    todo = [c for c in brief if c.get("image") and c["id"] not in old and not POCKET.match(c["id"].rsplit("-", 1)[0])]
     if os.environ.get("LIMIT"):  # pour tester
         todo = todo[: int(os.environ["LIMIT"])]
     print(f"{len(brief)} cartes, {len(old)} déjà connues, {len(todo)} à traiter")
@@ -109,11 +110,15 @@ def main():
             f.write(f"more={'yes' if stopped and left else 'no'}\n")
 
 
+# Pokémon TCG Pocket (jeu mobile) : pas de vraies cartes, et mêmes illustrations que les cartes physiques
+POCKET = re.compile(r"^(P-[AB]|[AB]\d+[a-z]?)$")
+
+
 def save(sets, brief, feats, commit):
     set_ids = {s["id"] for s in sets}
     cards, rows = [], []
     for c in brief:
-        if c["id"] not in feats:
+        if c["id"] not in feats or POCKET.match(c["id"].rsplit("-", 1)[0]):
             continue
         # l'id d'une carte = "<setId>-<numéro>" ; le set peut lui-même contenir des tirets
         sid = c["id"][: -(len(c["localId"]) + 1)]
