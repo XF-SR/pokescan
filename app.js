@@ -471,11 +471,68 @@ function searchDb() {
   el.querySelectorAll('li[data-id]').forEach(li => li.onclick = () => { const box = openSheet('<div></div>'); addBlock(box.firstChild, li.dataset.id); });
 }
 
+
+// ---------- nouvelles cartes (au plus une fois par heure, en arrière-plan) ----------
+const b64i8 = r => { let s = ''; for (const x of r) s += String.fromCharCode(x & 255); return btoa(s); };
+const i8b64 = b => Int8Array.from(atob(b), c => (c.charCodeAt(0) << 24) >> 24);
+function loadExtras() {
+  const ex = store.get('extras', { cards: [], rows: [], sets: {} });
+  // les cartes que la base GitHub contient déjà n'ont plus besoin d'être gardées ici
+  const keep = ex.cards.map((c, k) => [c, ex.rows[k]]).filter(([c]) => !Scan.db.byId.has(c[0]));
+  ex.cards = keep.map(x => x[0]); ex.rows = keep.map(x => x[1]);
+  for (const id in ex.sets || {}) if (!Scan.db.sets[id]) Scan.db.sets[id] = ex.sets[id];
+  Scan.addCards(ex.cards, ex.rows.map(i8b64));
+  store.set('extras', ex);
+}
+let updating = false;
+async function checkNewCards(force = false) {
+  if (updating || !Scan.db) return;
+  if (!force && Date.now() - store.get('lastCheck', 0) < 3600e3) return;
+  updating = true;
+  try {
+    const [brief, sets] = await Promise.all([fetch(API + '/cards').then(r => r.json()), fetch(API + '/sets').then(r => r.json())]);
+    store.set('lastCheck', Date.now());
+    const ex = store.get('extras', { cards: [], rows: [], sets: {} });
+    for (const s of sets) if (!Scan.db.sets[s.id]) { Scan.db.sets[s.id] = ex.sets[s.id] = [s.name, s.cardCount?.official || 0]; }
+    const setIds = new Set(sets.map(s => s.id));
+    const todo = brief.filter(c => c.image && !Scan.db.byId.has(c.id)).slice(0, 400);
+    let added = 0;
+    const one = c => new Promise(res => {
+      const img = new Image(); img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          let sid = c.id.slice(0, -(c.localId.length + 1)); if (!setIds.has(sid)) sid = c.id.replace(/-[^-]*$/, '');
+          const card = [c.id, c.name, c.localId, sid, c.image.split('/fr/')[1]], row = Scan.featureFromCardImage(img);
+          if (Scan.addCards([card], [row])) { ex.cards.push(card); ex.rows.push(b64i8(row)); added++; }
+        } catch {}
+        res();
+      };
+      img.onerror = () => res();
+      img.src = c.image + '/low.png';
+    });
+    for (let i = 0; i < todo.length; i += 3) {
+      await Promise.all(todo.slice(i, i + 3).map(one));
+      $('#s-new').textContent = `Nouvelles cartes : ${Math.min(i + 3, todo.length)} / ${todo.length}`;
+      await new Promise(r => setTimeout(r, 30)); // laisse respirer l'app
+    }
+    store.set('extras', ex);
+    store.set('lastNew', { at: Date.now(), added });
+    if (added) toast(`${added} nouvelle${added > 1 ? 's' : ''} carte${added > 1 ? 's' : ''} ajoutée${added > 1 ? 's' : ''} au scanner`);
+  } catch {}
+  updating = false;
+  showNewStatus();
+}
+function showNewStatus() {
+  const l = store.get('lastNew', null), el = $('#s-new');
+  if (el && !updating) el.textContent = l ? `Dernière recherche de nouvelles cartes : ${new Date(l.at).toLocaleString('fr-CH', { dateStyle: 'short', timeStyle: 'short' })} (${l.added} ajoutée${l.added > 1 ? 's' : ''})` : '';
+}
+
 // ---------- réglages ----------
 function fillSettings() {
   $('#s-user').value = cfg.user; $('#s-repo').value = cfg.repo; $('#s-token').value = cfg.token;
   const db = Scan.db;
-  $('#s-db').textContent = db ? `Base du scanner : ${db.cards.length.toLocaleString('fr-CH')} cartes (mise à jour le ${db.built}).` : '';
+  $('#s-db').textContent = db ? `Base du scanner : ${db.cards.length.toLocaleString('fr-CH')} cartes (base du ${db.built} + nouveautés).` : '';
+  showNewStatus();
 }
 $('#s-save').onclick = async () => {
   cfg.user = $('#s-user').value.trim(); cfg.repo = $('#s-repo').value.trim(); cfg.token = $('#s-token').value.trim();
@@ -499,11 +556,13 @@ $('#s-prices').onclick = async () => {
   $('#hint').textContent = 'Chargement de la base des cartes…';
   try { await Scan.load('./'); }
   catch { $('#hint').textContent = 'Base des cartes introuvable'; toast('La base du scanner n\'est pas encore construite'); return; }
+  try { loadExtras(); } catch {}
+  checkNewCards();
   if (!ready()) { show('set'); $('#s-msg').textContent = 'Bienvenue ! Entre tes infos GitHub pour sauvegarder ta collection.'; }
   else show('scan');
   pull();
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) stopCam(); else { if (view === 'scan') startCam(); pull(); }
+    if (document.hidden) stopCam(); else { if (view === 'scan') startCam(); pull(); checkNewCards(); }
   });
 })();
 }

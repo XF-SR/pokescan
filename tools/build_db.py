@@ -12,6 +12,7 @@ import io
 import json
 import os
 import sys
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,11 +26,13 @@ from features import feature, DIM  # noqa: E402
 API = "https://api.tcgdex.net/v2/fr"
 OUT = os.path.join(os.path.dirname(__file__), "..", "db")
 SCALE = 32.0
+BUDGET = float(os.environ.get("BUDGET_MIN", "95")) * 60  # temps max avant sauvegarde finale
+T0 = time.time()
 session = requests.Session()
 session.headers["User-Agent"] = "pokescan-db-builder"
 
 
-def get(url, binary=False, tries=6):
+def get(url, binary=False, tries=4):
     for i in range(tries):
         try:
             r = session.get(url, timeout=30)
@@ -80,14 +83,33 @@ def main():
         return c["id"], np.clip(np.round(f * SCALE), -127, 127).astype(np.int8)
 
     new = {}
+    done = 0
+    stopped = False
     with ThreadPoolExecutor(6) as ex:
-        for n, (cid, f) in enumerate(ex.map(work, todo), 1):
-            if f is not None:
-                new[cid] = f
-            if n % 500 == 0:
-                print(n, "/", len(todo))
-    feats = {**old, **new}
+        it = iter(todo)
+        while True:
+            batch = [c for _, c in zip(range(300), it)]
+            if not batch:
+                break
+            for cid, f in ex.map(work, batch):
+                if f is not None:
+                    new[cid] = f
+            done += len(batch)
+            print(f"{done} / {len(todo)}  ({len(new)} ok, {int(time.time() - T0) // 60} min)", flush=True)
+            if done % 2100 == 0:
+                save(sets, brief, {**old, **new}, commit=True)
+            if time.time() - T0 > BUDGET:
+                stopped = True
+                break
+    save(sets, brief, {**old, **new}, commit=False)
+    left = len(todo) - done
+    print(f"Fini pour cette fois : {left} cartes restantes", flush=True)
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"more={'yes' if stopped and left else 'no'}\n")
 
+
+def save(sets, brief, feats, commit):
     set_ids = {s["id"] for s in sets}
     cards, rows = [], []
     for c in brief:
@@ -107,7 +129,13 @@ def main():
     np.stack(rows).astype(np.int8).tofile(os.path.join(OUT, "features.bin"))
     with open(os.path.join(OUT, "index.json"), "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"OK : {len(cards)} cartes dans la base")
+    print(f"Sauvegarde : {len(cards)} cartes dans la base", flush=True)
+    if commit and os.environ.get("GITHUB_ACTIONS"):
+        sh = lambda *a: subprocess.run(a, cwd=os.path.join(OUT, ".."), check=False)
+        sh("git", "add", "db")
+        sh("git", "commit", "-qm", f"Base du scanner : {len(cards)} cartes")
+        sh("git", "pull", "-q", "--rebase")
+        sh("git", "push", "-q")
 
 
 if __name__ == "__main__":

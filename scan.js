@@ -103,6 +103,27 @@ const Scan = (() => {
     return cands.sort((a, b) => a.d - b.d);
   }
 
-  return { feature, featureFrom, load, match, applyOcr, get db() { return DB; } };
+  // Ajoute des cartes calculées dans l'app (nouvelles sorties) : rows = [Int8Array(dim)]
+  function addCards(cards, rows) {
+    const fresh = cards.map((c, k) => [c, rows[k]]).filter(([c]) => !DB.byId.has(c[0]));
+    if (!fresh.length) return 0;
+    const n = DB.feats.length, out = new Int8Array(n + fresh.length * DB.dim);
+    out.set(DB.feats);
+    fresh.forEach(([c, r], k) => { out.set(r, n + k * DB.dim); DB.byId.set(c[0], DB.cards.length); DB.cards.push(c); });
+    DB.feats = out;
+    return fresh.length;
+  }
+  const quant = f => { const q = new Int8Array(f.length); for (let j = 0; j < f.length; j++) q[j] = Math.max(-127, Math.min(127, Math.round(f[j] * DB.scale))); return q; };
+  // Empreinte d'une image de carte TCGdex (PNG à coins transparents posés sur du gris, comme en Python)
+  function featureFromCardImage(img) {
+    cv.width = 256; cv.height = 352;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = 'rgb(128,128,128)'; ctx.fillRect(0, 0, 256, 352);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, 256, 352);
+    return quant(feature(ctx.getImageData(0, 0, 256, 352).data));
+  }
+
+  return { feature, featureFrom, featureFromCardImage, load, match, applyOcr, addCards, get db() { return DB; } };
 })();
 if (typeof module !== 'undefined') module.exports = Scan;
