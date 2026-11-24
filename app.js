@@ -29,23 +29,36 @@ const details = new Map(); // id -> carte TCGdex complète (avec prix)
 
 // ---------- prix ----------
 // Même règle que tools/update_prices.py
-function priceEur(card, variant) {
+// Prix Cardmarket (EUR) ; si Cardmarket n'a rien, prix TCGplayer (USD) converti en EUR.
+const TCG_KEYS = {
+  normal: ['normal', 'holofoil', 'unlimited', 'unlimited-holofoil'],
+  holo: ['holofoil', 'unlimited-holofoil', 'normal'],
+  reverse: ['reverse-holofoil'],
+  firstEdition: ['1st-edition-holofoil', '1st-edition', '1st-edition-normal'],
+};
+let usd = null; // dollars pour 1 euro
+function priceInfo(card, variant) {
   const cm = card?.pricing?.cardmarket || {};
   const keys = variant === 'reverse' ? ['trend-holo', 'avg30-holo', 'avg-holo'] : ['trend', 'avg30', 'avg'];
+  const low = (variant === 'reverse' ? cm['low-holo'] : null) || cm.low;
   const [trend, avg30] = [+cm[keys[0]] || 0, +cm[keys[1]] || 0];
   // Pic passager (ex. Rayquaza XY141 : tendance 138 €, moyenne 30 j 75 €) → on prend la moyenne 30 j
-  if (trend && avg30 && trend > 1.5 * avg30) return avg30;
-  for (const k of keys) if (cm[k]) return +cm[k];
+  if (trend && avg30 && trend > 1.5 * avg30) return { eur: avg30, low, src: 'Cardmarket' };
+  for (const k of keys) if (cm[k]) return { eur: +cm[k], low, src: 'Cardmarket' };
+  const tp = card?.pricing?.tcgplayer || {}, r = usd || 1.1;
+  for (const k of TCG_KEYS[variant] || []) {
+    const x = tp[k], p = x && (x.marketPrice || x.midPrice);
+    if (p) return { eur: p / r, low: x.lowPrice ? x.lowPrice / r : null, src: 'TCGplayer' };
+  }
   return null;
 }
-// Prix douteux = TCGdex a probablement relié la carte au mauvais produit Cardmarket
+const priceEur = (card, variant) => priceInfo(card, variant)?.eur ?? null;
+// Prix douteux = TCGdex a probablement relié la carte au mauvais produit
 // (ex. Mewtwo EX XY107 à 5'550 € sans aucune offre "low"). Même règle que tools/update_prices.py
 function suspect(card, variant) {
-  const p = priceEur(card, variant);
-  if (p == null || p < 50) return false;
-  const cm = card?.pricing?.cardmarket || {};
-  const low = (variant === 'reverse' ? cm['low-holo'] : null) || cm.low;
-  return low ? p > 30 * low : p >= 100;
+  const i = priceInfo(card, variant);
+  if (!i || i.eur < 50) return false;
+  return i.low ? i.eur > 30 * i.low : i.eur >= 100;
 }
 const trustedEur = (card, v) => suspect(card, v) ? null : priceEur(card, v);
 const curRate = () => rate || hist.days?.[hist.days.length - 1]?.rate || 0.93;
@@ -63,9 +76,9 @@ async function getRate() {
   if (rate) return rate;
   const last = hist.days?.[hist.days.length - 1];
   try {
-    const r = await fetch('https://api.frankfurter.dev/v1/latest?base=EUR&symbols=CHF').then(r => r.json());
-    rate = r.rates.CHF;
-  } catch { rate = last?.rate || 0.93; }
+    const r = await fetch('https://api.frankfurter.dev/v1/latest?base=EUR&symbols=CHF,USD').then(r => r.json());
+    rate = r.rates.CHF; usd = r.rates.USD || null;
+  } catch { rate = last?.rate || 0.93; usd = last?.usd || null; }
   return rate;
 }
 async function detail(id) {
@@ -446,7 +459,7 @@ async function itemSheet(it) {
     box.innerHTML = `<img class="bigimg" src="${IMG(info.img, 'high')}" alt="">
       <h2 style="margin:0">${esc(info.name)}</h2>
       <div class="note">${esc(info.set)} · ${esc(numTxt(info))}</div>
-      <div class="price" style="font-size:24px;font-weight:800;margin-top:6px">${u != null ? chf(u * r) : bad ? 'Prix douteux' : 'Prix inconnu'} <span class="note" style="font-weight:400">${u != null ? 'pièce' + (it.pm != null ? ' (manuel)' : '') : ''}</span></div>
+      <div class="price" style="font-size:24px;font-weight:800;margin-top:6px">${u != null ? chf(u * r) : bad ? 'Prix douteux' : 'Prix inconnu'} <span class="note" style="font-weight:400">${u != null ? 'pièce' + (it.pm != null ? ' (manuel)' : c && priceInfo(c, it.v)?.src === 'TCGplayer' ? ' · TCGplayer' : '') : ''}</span></div>
       ${bad && it.pm == null ? `<div class="warn">Cardmarket indique ${chf(raw * r)}, ce qui est sûrement une erreur de la base de prix (mauvais produit relié). Cette carte est <b>exclue du total</b> tant que tu n'as pas mis de prix manuel.</div>` : ''}
       <div class="pm"><label>Prix manuel (CHF)<input id="pm" type="number" inputmode="decimal" min="0" step="0.05" placeholder="${raw != null && !bad ? (raw * r).toFixed(2) : 'ex. 10'}" value="${it.pm ?? ''}"></label>
         <button class="btn" data-a="pm">${it.pm != null ? 'Modifier' : 'Utiliser'}</button>${it.pm != null ? '<button class="btn" data-a="pmx">Auto</button>' : ''}</div>
