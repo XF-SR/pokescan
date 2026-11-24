@@ -572,6 +572,7 @@ function showNewStatus() {
 
 // ---------- réglages ----------
 function fillSettings() {
+  $('#s-ver').textContent = 'Version de l\'app : ' + window.V;
   $('#s-user').value = cfg.user; $('#s-repo').value = cfg.repo; $('#s-token').value = cfg.token;
   const db = Scan.db;
   $('#s-db').textContent = db ? `Base du scanner : ${db.cards.length.toLocaleString('fr-CH')} cartes (base du ${db.built} + nouveautés).` : '';
@@ -608,4 +609,22 @@ $('#s-prices').onclick = async () => {
     if (document.hidden) stopCam(); else { if (view === 'scan') startCam(); pull(); checkNewCards(); }
   });
 })();
+
+// ---------- mise à jour de l'app ----------
+// L'iPhone garde les fichiers en cache : on télécharge index.html sans cache et on compare la version.
+async function checkUpdate(manual) {
+  try {
+    const html = await fetch('./?nocache=' + Date.now(), { cache: 'no-store' }).then(r => r.text());
+    const v = html.match(/name="pokescan-version" content="([^"]+)"/)?.[1];
+    // (une seule tentative par version, pour ne jamais boucler si le serveur renvoie encore l'ancienne page)
+    if (v && v !== window.V && (manual || sessionStorage.getItem('upd') !== v)) {
+      sessionStorage.setItem('upd', v); toast('Mise à jour…');
+      setTimeout(() => location.replace('./?v=' + encodeURIComponent(v)), 600);
+    }
+    else if (manual) toast('L\'app est à jour (' + window.V + ')');
+  } catch { if (manual) toast('Pas de connexion'); }
+}
+$('#s-upd').onclick = () => checkUpdate(true);
+checkUpdate(false);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(false); });
 }

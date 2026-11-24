@@ -9,3 +9,5 @@ Scanner de cartes Pokémon (FR) sans abonnement : une page web qui s'ouvre dans 
 
 Ce dépôt ne contient aucune donnée personnelle : la collection est dans le dépôt privé `pokescan-data`.
 Données des cartes et prix : [TCGdex](https://tcgdex.dev) (prix Cardmarket).
+
+**Mise à jour** : après chaque modification de `app.js`, `scan.js` ou `style.css`, changer la version dans `index.html` (`<meta name="pokescan-version">`). L'app voit la nouvelle version au prochain lancement et se recharge toute seule.

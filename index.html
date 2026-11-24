@@ -11,7 +11,10 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon.png">
 <title>PokéScan</title>
-<link rel="stylesheet" href="style.css">
+<!-- Version de l'app : à changer à chaque mise à jour, pour que l'iPhone recharge app.js / scan.js / style.css -->
+<meta name="pokescan-version" content="2026-11-24.3">
+<script>window.V = document.querySelector('meta[name=pokescan-version]').content;
+document.write('<link rel="stylesheet" href="style.css?v=' + V + '">');</script>
 </head>
 <body>
 <main>
@@ -78,6 +81,9 @@
     <p class="note">Les prix sont relevés automatiquement chaque nuit. Ce bouton lance la relève tout de suite (environ 2 minutes).</p>
     <p id="s-db" class="note"></p>
     <p id="s-new" class="note"></p>
+    <hr>
+    <button id="s-upd" class="btn wide">Rechercher une mise à jour</button>
+    <p id="s-ver" class="note"></p>
   </section>
 </main>
 
@@ -92,7 +98,6 @@
 </nav>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script src="scan.js"></script>
-<script src="app.js"></script>
+<script>document.write('<script src="scan.js?v=' + V + '"><\/script><script src="app.js?v=' + V + '"><\/script>');</script>
 </body>
 </html>
