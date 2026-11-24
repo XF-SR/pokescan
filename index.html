@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PokéScan">
+<meta name="theme-color" content="#12131a">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>PokéScan</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <!-- SCANNER -->
+  <section id="v-scan" class="view on">
+    <div id="cam">
+      <video id="video" playsinline muted autoplay></video>
+      <div id="overlay"></div>
+      <div id="hint">Place une carte dans le cadre</div>
+      <div id="camoff" hidden>
+        <p>La caméra n'est pas active.</p>
+        <button id="camstart" class="btn primary">Activer la caméra</button>
+      </div>
+    </div>
+    <div class="seg" id="mode">
+      <button data-m="card" class="on">Carte</button>
+      <button data-m="page">Page de classeur</button>
+    </div>
+    <button id="shoot" class="btn primary wide" hidden>Capturer la page</button>
+    <div id="result"></div>
+  </section>
+
+  <!-- COLLECTION -->
+  <section id="v-coll" class="view">
+    <header class="total">
+      <div class="lbl">Valeur de la collection</div>
+      <div id="total" class="big">—</div>
+      <div id="delta" class="delta"></div>
+      <div class="seg small" id="range">
+        <button data-r="7">1S</button><button data-r="30" class="on">1M</button>
+        <button data-r="90">3M</button><button data-r="365">1A</button><button data-r="0">Tout</button>
+      </div>
+      <div class="fig" id="chart"></div>
+      <div id="chartnote" class="note"></div>
+    </header>
+    <div class="tools">
+      <input id="q" type="search" placeholder="Chercher dans ma collection" autocomplete="off">
+      <select id="sort">
+        <option value="val">Valeur</option><option value="name">Nom</option><option value="new">Récent</option>
+      </select>
+    </div>
+    <div id="count" class="note"></div>
+    <ul id="list" class="cards"></ul>
+  </section>
+
+  <!-- AJOUT MANUEL -->
+  <section id="v-add" class="view">
+    <h2>Ajouter à la main</h2>
+    <p class="note">Si le scan n'y arrive pas : tape le nom (et éventuellement le numéro, ex. « Dracaufeu 4 »).</p>
+    <input id="aq" type="search" placeholder="Nom de la carte" autocomplete="off">
+    <ul id="alist" class="cards"></ul>
+  </section>
+
+  <!-- RÉGLAGES -->
+  <section id="v-set" class="view">
+    <h2>Réglages</h2>
+    <label>Nom d'utilisateur GitHub<input id="s-user" autocomplete="off" autocapitalize="off"></label>
+    <label>Dépôt privé des données<input id="s-repo" value="pokescan-data" autocomplete="off" autocapitalize="off"></label>
+    <label>Clé d'accès (token GitHub)<input id="s-token" type="password" autocomplete="off"></label>
+    <button id="s-save" class="btn primary wide">Enregistrer et tester</button>
+    <p id="s-msg" class="note"></p>
+    <hr>
+    <button id="s-prices" class="btn wide">Relever les prix maintenant</button>
+    <p class="note">Les prix sont relevés automatiquement chaque nuit. Ce bouton lance la relève tout de suite (environ 2 minutes).</p>
+    <p id="s-db" class="note"></p>
+  </section>
+</main>
+
+<div id="sheet" hidden><div class="sheet-bg"></div><div class="sheet-box" id="sheetbox"></div></div>
+<div id="toast" hidden></div>
+
+<nav>
+  <button data-v="scan" class="on">Scanner</button>
+  <button data-v="coll">Collection</button>
+  <button data-v="add">Ajouter</button>
+  <button data-v="set">Réglages</button>
+</nav>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="scan.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
