@@ -32,14 +32,33 @@ const details = new Map(); // id -> carte TCGdex complète (avec prix)
 function priceEur(card, variant) {
   const cm = card?.pricing?.cardmarket || {};
   const keys = variant === 'reverse' ? ['trend-holo', 'avg30-holo', 'avg-holo'] : ['trend', 'avg30', 'avg'];
+  const [trend, avg30] = [+cm[keys[0]] || 0, +cm[keys[1]] || 0];
+  // Pic passager (ex. Rayquaza XY141 : tendance 138 €, moyenne 30 j 75 €) → on prend la moyenne 30 j
+  if (trend && avg30 && trend > 1.5 * avg30) return avg30;
   for (const k of keys) if (cm[k]) return +cm[k];
   return null;
 }
+// Prix douteux = TCGdex a probablement relié la carte au mauvais produit Cardmarket
+// (ex. Mewtwo EX XY107 à 5'550 € sans aucune offre "low"). Même règle que tools/update_prices.py
+function suspect(card, variant) {
+  const p = priceEur(card, variant);
+  if (p == null || p < 50) return false;
+  const cm = card?.pricing?.cardmarket || {};
+  const low = (variant === 'reverse' ? cm['low-holo'] : null) || cm.low;
+  return low ? p > 30 * low : p >= 100;
+}
+const trustedEur = (card, v) => suspect(card, v) ? null : priceEur(card, v);
+const curRate = () => rate || hist.days?.[hist.days.length - 1]?.rate || 0.93;
 function unitEur(it) {
+  if (it.pm != null) return it.pm / curRate(); // prix manuel (saisi en CHF)
   const s = hist.prices?.[it.id + '|' + it.v];
+  if (details.has(it.id) && suspect(details.get(it.id), it.v)) return null; // exclu du total
   const live = details.has(it.id) ? priceEur(details.get(it.id), it.v) : null;
   return live ?? (s && s.length ? s[s.length - 1][1] : null);
 }
+const isSuspect = it => it.pm == null && details.has(it.id) && suspect(details.get(it.id), it.v);
+// Les promos (et numéros avec lettres) n'ont pas de "/total" imprimé
+const numTxt = info => /^Promo/i.test(info.set) || /[a-z]/i.test(info.num) ? info.num : `${info.num}/${info.total || '?'}`;
 async function getRate() {
   if (rate) return rate;
   const last = hist.days?.[hist.days.length - 1];
@@ -156,12 +175,12 @@ async function addBlock(el, id, { alts = [], onDone, label = 'Ajouter', onPick, 
   let v = v0, q = q0;
   const draw = c => {
     const vs = variantsOf(c); if (!v || !vs.includes(v)) v = vs[0];
-    const p = c ? priceEur(c, v) : null;
+    const p = c ? trustedEur(c, v) : null, bad = c && suspect(c, v);
     el.innerHTML = `<div class="res">
       <div class="res-main"><img src="${IMG(info.img)}" alt="">
         <div><h3>${esc(info.name)}</h3>
-          <div class="meta">${esc(info.set)} · ${esc(info.num)}/${esc(info.total || '?')}</div>
-          <div class="price">${c ? (p != null ? chf(p * (rate || 0.93)) : 'Prix inconnu') : '…'}</div>
+          <div class="meta">${esc(info.set)} · ${esc(numTxt(info))}</div>
+          <div class="price">${c ? (p != null ? chf(p * curRate()) : bad ? 'Prix douteux' : 'Prix inconnu') : '…'}</div>
           <div class="chips">${vs.map(k => `<button class="chip ${k === v ? 'on' : ''}" data-v="${k}">${VNAME[k]}</button>`).join('')}</div>
         </div></div>
       <div class="qty"><button data-q="-1" aria-label="Moins">−</button><span>${q}</span><button data-q="1" aria-label="Plus">+</button>
@@ -398,7 +417,7 @@ function renderTotal() {
   $('#count').textContent = `${n} carte${n > 1 ? 's' : ''} · ${coll.items.length} référence${coll.items.length > 1 ? 's' : ''}`;
 }
 function renderList() {
-  const r = rate || 0.93, q = norm($('#q').value.trim()), sort = $('#sort').value;
+  const r = curRate(), q = norm($('#q').value.trim()), sort = $('#sort').value;
   let rows = coll.items.map((it, k) => ({ it, k, info: cardInfo(it.id), u: unitEur(it) }));
   if (q) rows = rows.filter(x => x.info && norm(x.info.name + ' ' + x.info.set).includes(q));
   rows.sort(sort === 'name' ? (a, b) => (a.info?.name || '').localeCompare(b.info?.name || '')
@@ -406,8 +425,8 @@ function renderList() {
     : (a, b) => (b.u || 0) * b.it.q - (a.u || 0) * a.it.q);
   $('#list').innerHTML = rows.slice(0, 400).map(({ it, k, info, u }) => info ? `<li data-k="${k}">
     <img src="${IMG(info.img)}" alt="" loading="lazy">
-    <div class="t"><b>${esc(info.name)}</b><span>${esc(info.set)} · ${esc(info.num)} · ${VNAME[it.v] || esc(it.v)}${it.q > 1 ? ' · ×' + it.q : ''}</span></div>
-    <div class="v">${u != null ? chf(u * it.q * r) : '…'}${it.q > 1 && u != null ? `<small>${chf(u * r)} pièce</small>` : ''}</div></li>` : '').join('')
+    <div class="t"><b>${esc(info.name)}</b><span>${esc(info.set)} · ${esc(info.num)} · ${VNAME[it.v] || esc(it.v)}${it.q > 1 ? ' · ×' + it.q : ''}${it.pm != null ? ' · prix manuel' : ''}</span></div>
+    <div class="v">${u != null ? chf(u * it.q * r) : isSuspect(it) ? '<small>Prix douteux</small>' : '…'}${it.q > 1 && u != null ? `<small>${chf(u * r)} pièce</small>` : ''}</div></li>` : '').join('')
     || '<li class="note">Aucune carte pour l\'instant. Va dans Scanner pour en ajouter.</li>';
   $('#list').querySelectorAll('li[data-k]').forEach(li => li.onclick = () => itemSheet(coll.items[+li.dataset.k]));
 }
@@ -421,12 +440,16 @@ async function itemSheet(it) {
   const info = cardInfo(it.id); if (!info) return;
   const box = openSheet('');
   const draw = c => {
-    const r = rate || 0.93, u = unitEur(it), vs = variantsOf(c);
+    const r = curRate(), u = unitEur(it), vs = variantsOf(c);
+    const raw = c ? priceEur(c, it.v) : null, bad = c && suspect(c, it.v);
     if (!vs.includes(it.v)) vs.push(it.v);
     box.innerHTML = `<img class="bigimg" src="${IMG(info.img, 'high')}" alt="">
       <h2 style="margin:0">${esc(info.name)}</h2>
-      <div class="note">${esc(info.set)} · ${esc(info.num)}/${esc(info.total || '?')}</div>
-      <div class="price" style="font-size:24px;font-weight:800;margin-top:6px">${u != null ? chf(u * r) : 'Prix inconnu'} <span class="note" style="font-weight:400">pièce</span></div>
+      <div class="note">${esc(info.set)} · ${esc(numTxt(info))}</div>
+      <div class="price" style="font-size:24px;font-weight:800;margin-top:6px">${u != null ? chf(u * r) : bad ? 'Prix douteux' : 'Prix inconnu'} <span class="note" style="font-weight:400">${u != null ? 'pièce' + (it.pm != null ? ' (manuel)' : '') : ''}</span></div>
+      ${bad && it.pm == null ? `<div class="warn">Cardmarket indique ${chf(raw * r)}, ce qui est sûrement une erreur de la base de prix (mauvais produit relié). Cette carte est <b>exclue du total</b> tant que tu n'as pas mis de prix manuel.</div>` : ''}
+      <div class="pm"><label>Prix manuel (CHF)<input id="pm" type="number" inputmode="decimal" min="0" step="0.05" placeholder="${raw != null && !bad ? (raw * r).toFixed(2) : 'ex. 10'}" value="${it.pm ?? ''}"></label>
+        <button class="btn" data-a="pm">${it.pm != null ? 'Modifier' : 'Utiliser'}</button>${it.pm != null ? '<button class="btn" data-a="pmx">Auto</button>' : ''}</div>
       <div class="fig" id="ichart" style="height:140px"></div><div class="note" id="inote"></div>
       <div class="chips">${vs.map(k => `<button class="chip ${k === it.v ? 'on' : ''}" data-v="${k}">${VNAME[k] || esc(k)}</button>`).join('')}</div>
       <div class="qty"><button data-q="-1" aria-label="Moins">−</button><span>${it.q}</span><button data-q="1" aria-label="Plus">+</button></div>
@@ -446,6 +469,13 @@ async function itemSheet(it) {
       if (del.dataset.sure) { coll.items.splice(coll.items.indexOf(it), 1); save(); closeSheet(); renderColl(); }
       else { del.dataset.sure = 1; del.textContent = 'Confirmer ?'; del.style.color = 'var(--down)'; }
     };
+    box.querySelector('[data-a=pm]').onclick = () => {
+      const x = parseFloat(String(box.querySelector('#pm').value).replace(',', '.'));
+      if (!(x >= 0)) { toast('Entre un prix en CHF'); return; }
+      it.pm = Math.round(x * 100) / 100; save(); draw(c); renderColl(); toast('Prix manuel enregistré');
+    };
+    const pmx = box.querySelector('[data-a=pmx]');
+    if (pmx) pmx.onclick = () => { delete it.pm; save(); draw(c); renderColl(); };
     box.querySelector('[data-a=ok]').onclick = closeSheet;
   };
   draw(details.get(it.id));
